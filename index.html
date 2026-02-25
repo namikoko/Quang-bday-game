@@ -1,0 +1,2325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Happy Birthday Quang! 🎂</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Beth+Ellen&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      width: 100vw;
+      font-family: 'Beth Ellen', cursive;
+    }
+    canvas {
+      display: block;
+      image-rendering: auto;
+    }
+    #cakeGifOverlay {
+      position: fixed;
+      display: none;
+      pointer-events: none;
+      z-index: 10;
+      border-radius: 16px;
+      object-fit: contain;
+      transition: opacity 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <img id="cakeGifOverlay" src="imports/Items/cake.gif" alt="" />
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // ── Game state ──────────────────────────────────────────
+    const game = {
+      state: "loading",  // "loading" | "menu" | "playing" | "transitioning"
+      selectedCharacter: null,
+      currentRoom: "outside",  // "outside" | "livingroom" | "bedroom"
+    };
+
+    // ── Asset loading tracking ────────────────────────────
+    let totalAssets = 0;
+    let loadedAssets = 0;
+    function markAssetLoaded() {
+      loadedAssets++;
+      // Don't auto-switch to menu — the iris wipe handles the transition
+    }
+    function trackAsset(img, onloadExtra) {
+      totalAssets++;
+      img.onload = () => {
+        if (onloadExtra) onloadExtra();
+        markAssetLoaded();
+      };
+      img.onerror = () => {
+        markAssetLoaded();
+      };
+    }
+
+    // ── Screen / viewport size ──────────────────────────────
+    let SCREEN_W = window.innerWidth;
+    let SCREEN_H = window.innerHeight;
+    canvas.width = SCREEN_W;
+    canvas.height = SCREEN_H;
+
+    // ── Load background ─────────────────────────────────────
+    const bgImg = new Image();
+    const livingRoomImg = new Image();
+    const bedroomImg = new Image();
+
+    // ── Load menu assets ────────────────────────────────────
+    const menuBgImg = new Image();
+    const playButtonImg = new Image();
+    const charSelImg = new Image();
+    const charSelectBgImg = new Image();
+
+  trackAsset(menuBgImg);
+  trackAsset(playButtonImg);
+  trackAsset(charSelImg);
+  trackAsset(charSelectBgImg);
+  trackAsset(livingRoomImg);
+  trackAsset(bedroomImg);
+
+    // ── Load photo images (selfie1–4) ───────────────────────
+    const photoImgs = [];
+    for (let i = 1; i <= 4; i++) {
+      const img = new Image();
+      trackAsset(img);
+      img.src = `imports/Photos/selfie${i}.jpeg`;
+      photoImgs.push(img);
+    }
+
+    // ── Load cake assets (bedroom) ──────────────────────────
+    const cakeGif = new Image();     // animated cake with candles lit
+    const cakeOffImg = new Image();  // cake with candles blown out
+    trackAsset(cakeGif);
+    trackAsset(cakeOffImg);
+    cakeGif.src = "imports/Items/cake.gif";
+    cakeOffImg.src = "imports/Items/rename.png";
+
+    // ── Load birthday card (bedroom bag) ────────────────────
+    const cardImg = new Image();
+    trackAsset(cardImg);
+    cardImg.src = "imports/Items/Card.jpeg";
+
+    // ── Load audio ──────────────────────────────────────────
+    const bgMusic = new Audio("imports/Audio/background.mp3");
+    bgMusic.loop = true;
+    bgMusic.volume = 0.3;
+
+    const sfxBounce = new Audio("imports/Audio/bounce.mp3");
+    sfxBounce.volume = 0.5;
+
+    const sfxFallin = new Audio("imports/Audio/fallin.mp3");
+    sfxFallin.volume = 0.5;
+
+    const sfxPopup = new Audio("imports/Audio/popup.mp3");
+    sfxPopup.volume = 0.5;
+
+    const sfxSelect = new Audio("imports/Audio/Select.mp3");
+    sfxSelect.volume = 0.5;
+
+    const sfxTalking = new Audio("imports/Audio/Talking.mp3");
+    sfxTalking.loop = true;
+    sfxTalking.volume = 1.0;
+
+    const sfxSurprise = new Audio("imports/Audio/Surprise.mp3");
+    sfxSurprise.volume = 0.6;
+
+    // Helper to play a sound (restarts if already playing)
+    function playSound(audio) {
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    }
+
+    function stopSound(audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+
+    // Background fills screen height, scrolls horizontally
+    let BG_W = SCREEN_W * 2;
+    let BG_H = SCREEN_H;
+
+    trackAsset(bgImg, () => {
+      // "Cover" approach: scale so BG covers full screen, no gaps
+      const imgRatio = bgImg.naturalWidth / bgImg.naturalHeight;
+      const screenRatio = SCREEN_W / SCREEN_H;
+
+      if (imgRatio > screenRatio) {
+        // Image is wider than screen ratio — fit height, width overflows (scrollable)
+        BG_H = SCREEN_H;
+        BG_W = BG_H * imgRatio;
+      } else {
+        // Image is taller than screen ratio — fit width, height overflows
+        BG_W = SCREEN_W;
+        BG_H = BG_W / imgRatio;
+      }
+
+      // Make sure it's at least as big as the screen in both directions
+      if (BG_W < SCREEN_W) { BG_W = SCREEN_W; BG_H = BG_W / imgRatio; }
+      if (BG_H < SCREEN_H) { BG_H = SCREEN_H; BG_W = BG_H * imgRatio; }
+    });
+
+    bgImg.src = "imports/Backgrounds/biggerhouse.jpeg";
+    livingRoomImg.src = "imports/Backgrounds/livingroom.jpeg";
+    bedroomImg.src = "imports/Backgrounds/bedroom.jpeg";
+    menuBgImg.src = "imports/Backgrounds/menubackground.jpeg";
+    playButtonImg.src = "imports/Buttons/greenbutton.png";
+    charSelImg.src = "imports/Charactersprite/6.png";
+    charSelectBgImg.src = "imports/Items/Character select.png";
+
+    // ── Load sprite frames (jump 1‑6) ───────────────────────
+    const FRAME_COUNT = 6;
+    const spriteFrames = [];
+    let spritesLoaded = 0;
+
+    for (let i = 1; i <= FRAME_COUNT; i++) {
+      const img = new Image();
+      trackAsset(img, () => { spritesLoaded++; });
+      img.src = `imports/Charactersprite/${i}.png`;
+      spriteFrames.push(img);
+    }
+
+    // ── Player state ────────────────────────────────────────
+    const SPRITE_SCALE = 0.45;          // tweak to taste
+    const JUMP_DISTANCE = 120;          // how far one jump moves (pixels)
+    const JUMP_ANIM_SPEED = 50;        // ms per frame during a jump
+
+    const player = {
+      x: 200,                           // position in WORLD coords
+      y: 0,                             // will be set once bg loads
+      groundY: 0,                       // remember ground position
+      w: 0,
+      h: 0,
+      frame: 0,                         // current sprite frame index
+      animTimer: 0,
+      facingRight: true,
+      // Jump state
+      jumping: false,                   // currently mid-jump?
+      jumpDirX: 0,                      // direction of current jump
+      jumpDirY: 0,
+      jumpProgress: 0,                  // how many frames played so far
+      jumpOffsetY: 0,                   // visual vertical offset for arc
+      // Drop entrance
+      dropping: true,                   // currently in drop-from-sky intro?
+      dropVelocity: 0,                  // current fall speed
+      dropBounces: 0,                   // how many bounces so far
+      dropSquash: 0,                    // squash timer for landing impact
+    };
+
+    // ── Dialogue system ─────────────────────────────────────
+    const dialogue = {
+      active: false,
+      queue: [],                        // array of message strings
+      text: "",
+      displayedText: "",
+      charIndex: 0,
+      timer: 0,
+      speed: 45,                        // ms per character
+      enterAnim: 0,                     // 0→1 pop-in animation
+      enterDur: 400,                    // ms for bubble to appear
+      wobbleTime: 0,                    // continuous wobble timer
+      dismissed: false,                 // all messages done
+      blobPhases: [0, Math.PI * 0.7, Math.PI * 1.4],
+    };
+
+    function startDialogueChain(messages) {
+      dialogue.queue = messages.slice();
+      dialogue.dismissed = false;
+      showNextDialogue();
+    }
+
+    function showNextDialogue() {
+      if (dialogue.queue.length === 0) {
+        dialogue.active = false;
+        dialogue.dismissed = true;
+        // When SURPRISE! dialogue ends in bedroom → lights on + confetti!
+        if (game.currentRoom === "bedroom" && bedroom.dark) {
+          bedroom.dark = false;
+          bedroom.lightsOn = true;
+          bedroom.lightsFade = 0;
+          bedroom.confettiActive = true;
+          spawnConfetti();
+        }
+        return;
+      }
+      dialogue.active = true;
+      dialogue.text = dialogue.queue.shift();
+      dialogue.displayedText = "";
+      dialogue.charIndex = 0;
+      dialogue.timer = 0;
+      dialogue.enterAnim = 0;
+      dialogue.wobbleTime = 0;
+      playSound(sfxPopup);
+      // Start talking sound (will stop when typing finishes)
+      playSound(sfxTalking);
+    }
+
+    function dismissDialogue() {
+      if (!dialogue.active) return;
+      // If text isn't fully shown, show it all instantly
+      if (dialogue.charIndex < dialogue.text.length) {
+        dialogue.displayedText = dialogue.text;
+        dialogue.charIndex = dialogue.text.length;
+        stopSound(sfxTalking);
+        return;
+      }
+      // Move to next message (or close)
+      stopSound(sfxTalking);
+      showNextDialogue();
+    }
+
+    // ── Camera (top‑left of the viewport in world coords) ───
+    const camera = { x: 0, y: 0 };
+
+    // ── Gate / room transition system ───────────────────────
+    const gate = {
+      xRatio: 0.55,                     // gate position as ratio of BG width (door is ~55% across)
+      range: 140,                       // how close the player needs to be (generous for hop-based movement)
+      promptAnim: 0,                    // 0→1 for prompt pop-in
+      promptWobble: 0,
+    };
+
+    const transition = {
+      active: false,
+      phase: "none",        // "closing" | "black" | "opening" | "none"
+      timer: 0,
+      closeDur: 600,        // iris close duration
+      blackDur: 0,        // hold black
+      openDur: 500,         // iris open duration
+      targetRoom: null,     // room to switch to
+    };
+
+    function startRoomTransition(targetRoom) {
+      if (transition.active) return;
+      transition.active = true;
+      transition.phase = "closing";
+      transition.timer = 0;
+      transition.targetRoom = targetRoom;
+    }
+
+    function isNearGate() {
+      if (game.currentRoom !== "outside") return false;
+      const playerCenter = player.x + player.w / 2;
+      const gateX = BG_W * gate.xRatio;
+      return Math.abs(playerCenter - gateX) < gate.range;
+    }
+
+    // ── Bedroom gate (far right wall of living room) ────────
+    const bedroomGate = {
+      range: 140,
+      promptAnim: 0,
+      promptWobble: 0,
+    };
+
+    function isNearBedroomGate() {
+      if (game.currentRoom !== "livingroom") return false;
+      const playerCenter = player.x + player.w / 2;
+      // Trigger when player is near the far right edge of the room
+      return playerCenter > BG_W - bedroomGate.range - player.w;
+    }
+
+    // ── Bedroom surprise state ──────────────────────────────
+    const bedroom = {
+      dark: true,               // room starts dark
+      darkOpacity: 0.7,         // how dim (0 = bright, 1 = pitch black)
+      lightsOn: false,          // after SURPRISE! dialogue dismissed
+      lightsFade: 0,            // 0→1 fade from dark to light
+      confettiActive: false,
+      surpriseShown: false,     // only trigger once
+    };
+
+    // Confetti particles
+    const confetti = [];
+    const CONFETTI_COLORS = [
+      "#ff6b8a", "#ff9a76", "#ffd93d", "#6bcb77",
+      "#4d96ff", "#9b59b6", "#ff85c0", "#00d2d3",
+      "#f368e0", "#ff9ff3", "#54a0ff", "#5f27cd",
+    ];
+
+    function spawnConfetti() {
+      confetti.length = 0;
+      for (let i = 0; i < 150; i++) {
+        confetti.push({
+          x: Math.random() * SCREEN_W,
+          y: -Math.random() * SCREEN_H * 1.5,  // start above screen, staggered
+          w: Math.random() * 10 + 5,
+          h: Math.random() * 6 + 3,
+          speedY: Math.random() * 2 + 1.5,
+          speedX: Math.random() * 1.5 - 0.75,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: Math.random() * 0.12 - 0.06,
+          color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+          wobblePhase: Math.random() * Math.PI * 2,
+          wobbleSpeed: Math.random() * 0.005 + 0.002,
+          opacity: 1,
+        });
+      }
+    }
+
+    // ── Cake (bedroom) ──────────────────────────────────────
+    // Position of the cake in the bedroom as ratios of BG_W / BG_H
+    const cake = {
+      xRatio: 0.45,   // roughly center of room
+      yRatio: 0.55,   // on the table/floor area
+      wRatio: 0.08,   // cake width
+      hRatio: 0.20,   // cake height
+      candlesOn: true, // starts with candles lit
+    };
+
+    const cakeOverlay = {
+      active: false,
+      fadeIn: 0,
+      blowDetected: false,  // mic blow detected
+      micActive: false,     // whether mic is listening
+      micStream: null,      // MediaStream reference
+      analyser: null,       // AnalyserNode
+      audioCtx: null,       // AudioContext
+      listenDelay: 0,       // ms to wait before actually checking mic (let user see GIF first)
+    };
+
+    let hoveredCake = false;  // is mouse over the cake?
+
+    // ── Birthday bag (bedroom) ──────────────────────────────
+    // Invisible hitbox over the bag in the bedroom background
+    const bag = {
+      xRatio: 0.55,   // adjust to where the bag sits in bedroom.jpeg
+      yRatio: 0.55,
+      wRatio: 0.08,
+      hRatio: 0.20,
+    };
+
+    const cardOverlay = {
+      active: false,
+      fadeIn: 0,
+    };
+
+    let hoveredBag = false;
+
+    // ── Photo frames (living room) ──────────────────────────
+    // Positions as ratios of BG_W / BG_H (estimated from the living room bg)
+    const photoFrames = [
+      { xRatio: 0.070, yRatio: 0.40, wRatio: 0.025, hRatio: 0.15 },   // frame 1 (far left wall)
+      { xRatio: 0.100, yRatio: 0.40, wRatio: 0.025, hRatio: 0.15 },   // frame 2
+      { xRatio: 0.725,  yRatio: 0.38, wRatio: 0.025, hRatio: 0.10 },   // frame 3 (right of window)
+      { xRatio: 0.775, yRatio: 0.36, wRatio: 0.025, hRatio: 0.14 },   // frame 4 (far right)
+    ];
+
+    const photoOverlay = {
+      active: false,
+      index: -1,          // which photo (0–3)
+      fadeIn: 0,           // 0→1 animation
+    };
+
+    let hoveredFrame = -1;  // index of frame mouse is over (-1 = none)
+
+    // ── Living room window clouds ───────────────────────────
+    // Window position as ratios of BG_W / BG_H (the big window in the living room)
+    const windowRegion = { xRatio: 0.34, yRatio: 0.08, wRatio: 0.28, hRatio: 0.52 };
+
+    const windowClouds = [];
+    for (let i = 0; i < 5; i++) {
+      windowClouds.push({
+        xOffset: Math.random(),          // 0–1 within window width
+        yOffset: Math.random() * 0.5 + 0.15,  // upper portion of window
+        w: Math.random() * 0.35 + 0.2,  // cloud width as ratio of window width
+        h: Math.random() * 0.12 + 0.06, // cloud height as ratio of window height
+        speed: Math.random() * 0.00008 + 0.00003,  // drift speed (ratio per ms)
+        opacity: Math.random() * 0.3 + 0.15,
+      });
+    }
+
+    // ── Input tracking ──────────────────────────────────────
+    // Handle menu clicks and game controls
+    canvas.addEventListener("click", (e) => {
+      // Close card overlay on click
+      if (cardOverlay.active) {
+        cardOverlay.active = false;
+        cardOverlay.fadeIn = 0;
+        playSound(sfxSelect);
+        return;
+      }
+      // Close cake overlay on click
+      if (cakeOverlay.active) {
+        playSound(sfxSelect);
+        if (cakeOverlay.blowDetected) {
+          // Candles already out — close the overlay
+          cakeOverlay.active = false;
+          cakeOverlay.fadeIn = 0;
+          cakeGifEl.style.display = "none";
+          stopMicListening();
+        } else if (!cakeOverlay.micActive) {
+          // Mic not available — click to blow out candles (fallback)
+          cakeOverlay.blowDetected = true;
+          cake.candlesOn = false;
+        }
+        return;  // always consume click when overlay is open
+      }
+      // Close photo overlay on click
+      if (photoOverlay.active) {
+        photoOverlay.active = false;
+        photoOverlay.fadeIn = 0;
+        playSound(sfxSelect);
+        return;
+      }
+      // Dismiss dialogue on click
+      if (game.state === "playing" && dialogue.active) {
+        playSound(sfxSelect);
+        dismissDialogue();
+        return;
+      }
+      // Click on cake in bedroom
+      if (game.state === "playing" && game.currentRoom === "bedroom" && hoveredCake && !bedroom.dark) {
+        playSound(sfxSelect);
+        cakeOverlay.active = true;
+        cakeOverlay.fadeIn = 0;
+        cakeOverlay.blowDetected = false;
+        cakeOverlay.listenDelay = 0;
+        cakeOverlay._blowFrames = 0;
+        cake.candlesOn = true;
+        // Force GIF to restart animation
+        cakeGifEl.src = "";
+        cakeGifEl.src = "imports/Items/cake.gif";
+        startMicListening();
+        return;
+      }
+      // Click on birthday bag in bedroom
+      if (game.state === "playing" && game.currentRoom === "bedroom" && hoveredBag && !bedroom.dark) {
+        playSound(sfxSelect);
+        cardOverlay.active = true;
+        cardOverlay.fadeIn = 0;
+        return;
+      }
+      // Click on photo frame in living room
+      if (game.state === "playing" && game.currentRoom === "livingroom" && hoveredFrame >= 0) {
+        playSound(sfxSelect);
+        photoOverlay.active = true;
+        photoOverlay.index = hoveredFrame;
+        photoOverlay.fadeIn = 0;
+        return;
+      }
+      if (game.state === "menu") {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        // Check play button — start bounce, then transition
+        if (menuState.playBtn && menuState.clickBounce === 0) {
+          const b = menuState.playBtn;
+          if (mx >= b.x && mx < b.x + b.w && my >= b.y && my < b.y + b.h) {
+            menuState.clickBounce = 0.001; // start bounce (non-zero)
+            playSound(sfxSelect);
+          }
+        }
+      }
+    });
+
+    // Game controls (arrow keys only during gameplay)
+    window.addEventListener("keydown", (e) => {
+      if (game.state !== "playing") return;
+      // Dismiss dialogue on any key
+      if (dialogue.active) { playSound(sfxSelect); dismissDialogue(); return; }
+      if (player.dropping) return;      // no input during drop entrance
+      if (transition.active) return;    // no input during transition
+      if (cakeOverlay.active) return;   // no input during cake view
+      if (cardOverlay.active) return;   // no input during card view
+      e.preventDefault();
+
+      // Enter key near gate → room transition
+      if (e.key === "Enter" && isNearGate()) {
+        playSound(sfxSelect);
+        startRoomTransition("livingroom");
+        return;
+      }
+      if (e.key === "Enter" && isNearBedroomGate()) {
+        playSound(sfxSelect);
+        startRoomTransition("bedroom");
+        return;
+      }
+
+      if (player.jumping) return;       // ignore if already mid-jump
+
+      let dx = 0, dy = 0;
+      if (e.key === "ArrowLeft"  || e.key === "a") { dx = -1; }
+      if (e.key === "ArrowRight" || e.key === "d") { dx =  1; }
+      if (e.key === "ArrowUp"    || e.key === "w") { dy = -1; }
+      if (e.key === "ArrowDown"  || e.key === "s") { dy =  1; }
+
+      if (dx !== 0 || dy !== 0) {
+        player.jumping = true;
+        player.jumpDirX = dx;
+        player.jumpDirY = dy;
+        player.jumpProgress = 0;
+        player.frame = 0;
+        player.animTimer = 0;
+        if (dx !== 0) player.facingRight = dx > 0;
+      }
+    });
+
+    // ── Helpers ─────────────────────────────────────────────
+    function clamp(val, min, max) {
+      return Math.max(min, Math.min(max, val));
+    }
+
+    // ── Menu state ──────────────────────────────────────────
+    const menuState = {
+      selectedChar: false,
+      menuTime: 0,
+      hoverPlay: false,         // mouse is over play button
+      clickBounce: 0,           // click animation timer (ms), 0 = inactive
+      clickBounceDur: 400,      // how long the bounce lasts
+    };
+
+    // ── Mouse tracking for hover ──────────────────────────
+    let mouseX = -1, mouseY = -1;
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      mouseY = e.clientY - rect.top;
+    });
+    canvas.addEventListener("mouseleave", () => {
+      mouseX = -1; mouseY = -1;
+    });
+
+    // ── Loading / Iris-wipe intro ────────────────────────
+    let loadingTime = 0;
+    let assetsReady = false;       // true once all assets finished
+    let irisPhase = "hold";         // "hold" → "wipe" → "done"
+    let phaseTimer = 0;
+
+    // Timing (ms)
+    const HOLD_BLACK     = 200;   // hold black screen before iris opens
+    const IRIS_OPEN_DUR  = 2500;   // slow iris wipe open
+
+    function drawLoading(dt) {
+      SCREEN_W = window.innerWidth;
+      SCREEN_H = window.innerHeight;
+      canvas.width = SCREEN_W;
+      canvas.height = SCREEN_H;
+
+      loadingTime += dt;
+
+      // Track when assets finish loading
+      if (!assetsReady && loadedAssets >= totalAssets) {
+        assetsReady = true;
+      }
+
+      const centerX = SCREEN_W / 2;
+      const centerY = SCREEN_H / 2;
+      // The radius that fully covers the screen corner-to-corner
+      const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY) + 20;
+
+      // ── Phase: "hold" — black screen, wait for assets ──
+      if (irisPhase === "hold") {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+        if (assetsReady) phaseTimer += dt;
+        if (phaseTimer >= HOLD_BLACK) {
+          irisPhase = "wipe";
+          phaseTimer = 0;
+        }
+        return;
+      }
+
+      // ── Phase: "wipe" — iris circle opens to reveal menu ──
+      if (irisPhase === "wipe") {
+        // Draw the menu behind the wipe so it's revealed
+        drawMenu();
+
+        // Ease-out progress (starts fast, slows at end)
+        const raw = Math.min(phaseTimer / IRIS_OPEN_DUR, 1);
+        const eased = 1 - (1 - raw) * (1 - raw);  // quadratic ease-out
+        const radius = eased * maxRadius;
+
+        // Black overlay with circular hole
+        ctx.save();
+        ctx.beginPath();
+        // Outer rect (full screen)
+        ctx.rect(0, 0, SCREEN_W, SCREEN_H);
+        // Inner circle (cut out) — counter-clockwise to create a hole
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2, true);
+        ctx.fillStyle = "#000";
+        ctx.fill();
+        ctx.restore();
+
+        phaseTimer += dt;
+        if (raw >= 1) {
+          irisPhase = "done";
+          game.state = "menu";
+        }
+        return;
+      }
+    }
+
+    // Menu sparkle particles
+    const menuSparkles = [];
+    for (let i = 0; i < 20; i++) {
+      menuSparkles.push({
+        x: Math.random(),
+        y: Math.random(),
+        size: Math.random() * 2.5 + 1,
+        phase: Math.random() * Math.PI * 2,
+        speed: Math.random() * 0.0008 + 0.0004,
+      });
+    }
+
+    function drawMenu() {
+      SCREEN_W = window.innerWidth;
+      SCREEN_H = window.innerHeight;
+      canvas.width = SCREEN_W;
+      canvas.height = SCREEN_H;
+      ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
+
+      menuState.menuTime += 16;
+
+      // Fill entire screen with game background (cover)
+      if (bgImg.complete) {
+        const ir = bgImg.naturalWidth / bgImg.naturalHeight;
+        const sr = SCREEN_W / SCREEN_H;
+        let dw, dh, dx, dy;
+        if (ir > sr) { dh = SCREEN_H; dw = dh * ir; dx = (SCREEN_W - dw) / 2; dy = 0; }
+        else { dw = SCREEN_W; dh = dw / ir; dx = 0; dy = (SCREEN_H - dh) / 2; }
+        ctx.drawImage(bgImg, dx, dy, dw, dh);
+      }
+      ctx.fillStyle = "rgba(0,0,0,0.15)";
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+      // ── Scale factor from Figma design (1280×832) to screen ──
+      // Menu bg in Figma: 778×544 at (251,144)
+      // We scale the whole menu proportionally to fit the screen
+      const DESIGN_W = 1280;
+      const DESIGN_H = 832;
+      const scale = Math.min(SCREEN_W / DESIGN_W, SCREEN_H / DESIGN_H) * 0.95;
+      const offsetX = (SCREEN_W - DESIGN_W * scale) / 2;
+      const offsetY = (SCREEN_H - DESIGN_H * scale) / 2;
+
+      // Helper: convert Figma coords to screen coords
+      function fx(x) { return offsetX + x * scale; }
+      function fy(y) { return offsetY + y * scale; }
+      function fs(s) { return s * scale; }
+
+      // Gentle float
+      const floatY = Math.sin(menuState.menuTime * 0.001) * 4;
+
+      // ── Menu background (rounded 60px) ──
+      const mbX = fx(251);
+      const mbY = fy(144) + floatY;
+      const mbW = fs(778);
+      const mbH = fs(544);
+      const mbR = fs(60);
+
+      if (menuBgImg.complete) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(mbX, mbY, mbW, mbH, mbR);
+        ctx.clip();
+        ctx.drawImage(menuBgImg, mbX, mbY, mbW, mbH);
+        ctx.restore();
+      }
+
+      // Center of the cloud
+      const centerX = mbX + mbW / 2;
+
+      // ── Title: "Quang's 24th!" ── centered, near top
+      ctx.save();
+      ctx.fillStyle = "#fff";
+      ctx.font = `${fs(40)}px 'Beth Ellen', cursive`;
+      ctx.textAlign = "center";
+      ctx.shadowColor = "rgba(0,0,0,0.25)";
+      ctx.shadowBlur = 3;
+      ctx.fillText("Quang's 24th!", centerX, mbY + mbH * 0.19+14);
+      ctx.restore();
+
+      // ── Character select area ── centered in the middle of the cloud
+      if (charSelectBgImg.complete) {
+        const csW = fs(220);
+        const csH = fs(197);
+        const csX = centerX - csW / 2;
+        const csY = mbY + mbH * 0.30;
+
+        const bounce = Math.sin(menuState.menuTime * 0.003) * 3;
+        ctx.drawImage(charSelectBgImg, csX, csY + bounce, csW, csH);
+      }
+
+      // ── Play button ── centered, near bottom
+      if (playButtonImg.complete) {
+        const pbW = fs(248);
+        const pbH = fs(135);
+        const pbX = centerX - pbW / 2 + 6;
+        const pbY = mbY + mbH * 0.62;
+        const pbCX = pbX + pbW / 2;
+        const pbCY = pbY + pbH / 2;
+        const rot = -6.72 * Math.PI / 180;
+
+        // Gentle bob (slightly offset from the cloud float)
+        const pbBob = Math.sin(menuState.menuTime * 0.0018 + 1.2) * 4;
+        // Subtle breathing scale
+        let pbScale = 1 + Math.sin(menuState.menuTime * 0.002) * 0.03;
+
+        // ── Hover detection ──
+        const isHover = mouseX >= pbX && mouseX < pbX + pbW &&
+                        mouseY >= pbY + pbBob && mouseY < pbY + pbBob + pbH;
+        menuState.hoverPlay = isHover;
+        canvas.style.cursor = (game.state === "menu" && isHover) ? "pointer" : "default";
+
+        // Hover: scale up a bit
+        if (isHover && menuState.clickBounce === 0) {
+          pbScale *= 1.08;
+        }
+
+        // ── Click bounce animation ──
+        let bounceScaleX = 1, bounceScaleY = 1;
+        if (menuState.clickBounce > 0) {
+          menuState.clickBounce += 16; // ~1 frame at 60fps
+          const t = menuState.clickBounce / menuState.clickBounceDur;
+          if (t >= 1) {
+            // Bounce done — transition to playing
+            menuState.clickBounce = 0;
+            game.state = "playing";
+            canvas.style.cursor = "default";
+            // Start background music
+            playSound(bgMusic);
+          } else {
+            // Squash down then spring back with overshoot
+            // t: 0→0.3 squash, 0.3→0.7 overshoot up, 0.7→1 settle
+            let sx, sy;
+            if (t < 0.25) {
+              const p = t / 0.25;
+              sx = 1 + 0.15 * p;   // stretch wide
+              sy = 1 - 0.18 * p;   // squash down
+            } else if (t < 0.55) {
+              const p = (t - 0.25) / 0.3;
+              sx = 1.15 - 0.25 * p; // snap narrow
+              sy = 0.82 + 0.30 * p; // spring tall
+            } else {
+              const p = (t - 0.55) / 0.45;
+              // Settle back with a little elastic wobble
+              const elastic = Math.sin(p * Math.PI * 2) * (1 - p) * 0.06;
+              sx = 0.90 + 0.10 * p + elastic;
+              sy = 1.12 - 0.12 * p - elastic;
+            }
+            bounceScaleX = sx;
+            bounceScaleY = sy;
+          }
+        }
+
+        // ── Draw the button ──
+        ctx.save();
+        ctx.translate(pbCX, pbCY + pbBob);
+        ctx.rotate(rot);
+        ctx.scale(pbScale * bounceScaleX, pbScale * bounceScaleY);
+
+        // Hover glow behind button
+        if (isHover || menuState.clickBounce > 0) {
+          ctx.save();
+          ctx.globalAlpha = 0.25;
+          ctx.shadowColor = "#fff";
+          ctx.shadowBlur = 25;
+          ctx.fillStyle = "rgba(255,255,255,0.15)";
+          ctx.beginPath();
+          ctx.ellipse(0, 0, pbW * 0.42, pbH * 0.35, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        ctx.drawImage(playButtonImg, -pbW / 2, -pbH / 2, pbW, pbH);
+        ctx.fillStyle = "#fff";
+        ctx.font = `${fs(30)}px 'Beth Ellen', cursive`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "rgba(0,0,0,0.3)";
+        ctx.shadowBlur = 3;
+        ctx.fillText("Play", 0, 0);
+        ctx.restore();
+
+        menuState.playBtn = { x: pbX, y: pbY + pbBob, w: pbW, h: pbH };
+      }
+
+   
+    }
+
+    // ── Game loop ───────────────────────────────────────────
+    let lastTime = 0;
+
+    function gameLoop(timestamp) {
+      const dt = timestamp - lastTime;
+      lastTime = timestamp;
+
+      if (game.state === "loading") {
+        drawLoading(dt);
+      } else if (game.state === "menu") {
+        drawMenu();
+      } else if (game.state === "playing") {
+        // Wait until at least the first sprite is ready
+        if (spritesLoaded === 0) {
+          requestAnimationFrame(gameLoop);
+          return;
+        }
+
+        // Set initial player size from first loaded sprite
+        if (player.w === 0) {
+          player.w = spriteFrames[0].naturalWidth * SPRITE_SCALE;
+          player.h = spriteFrames[0].naturalHeight * SPRITE_SCALE;
+          // Ground position
+          player.groundY = BG_H - player.h - 10;
+          // Start WAY above — drop from the sky!
+          player.y = -player.h - 200;
+          player.dropping = true;
+          player.dropVelocity = 0;
+          player.dropBounces = 0;
+          player.dropSquash = 0;
+          playSound(sfxFallin);
+        }
+
+        update(dt);
+        draw();
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+    requestAnimationFrame(gameLoop);
+
+    // ── Update ──────────────────────────────────────────────
+    // Jump arc heights per frame (0 = ground, 1 = peak)
+    // Frames: 1=start, 2=rising, 3=rising, 4=peak, 5=falling, 6=peak hold
+    const JUMP_ARC =    [0, 0.3, 0.6, 0.9, 1.0, 0.7, 0.3];  // index 0 unused
+    const JUMP_HEIGHT = 80;            // max height of the arc in pixels
+    // Hold peak frame (frame 6 / index 5) a bit longer
+    const FRAME_DURATIONS = [50, 50, 50, 50, 120, 50]; // ms per frame
+
+    function update(dt) {
+      // ── Drop-from-sky entrance ──────────────────────────
+      if (player.dropping) {
+        const gravity = 0.0018;          // pixels per ms²
+        const bounceDamping = 0.45;      // energy kept after each bounce
+        const maxBounces = 3;
+
+        player.dropVelocity += gravity * dt;
+        player.y += player.dropVelocity * dt;
+
+        // Hit the ground?
+        if (player.y >= player.groundY) {
+          player.y = player.groundY;
+          player.dropBounces++;
+          playSound(sfxBounce);
+
+          if (player.dropBounces >= maxBounces || Math.abs(player.dropVelocity) < 0.15) {
+            // Done bouncing — land for real
+            player.dropping = false;
+            player.y = player.groundY;
+            player.dropSquash = 0;
+            // Show tutorial dialogue (only on first drop outside)
+            if (!dialogue.dismissed && game.currentRoom === "outside") {
+              startDialogueChain([
+                "Happy Birthday Mr. Baby!",
+                "I tried to draw our dream house...",
+                "Press the left and right arrows to look around!"
+              ]);
+            }
+            // Show living room dialogue on arrival
+            if (game.currentRoom === "livingroom" && !player._livingRoomDialogueShown) {
+              player._livingRoomDialogueShown = true;
+              startDialogueChain([
+                "This room holds so many memories of us",
+                "little moments collected over the years"
+              ]);
+            }
+            // Bedroom: dark room → SURPRISE! dialogue
+            if (game.currentRoom === "bedroom" && !bedroom.surpriseShown) {
+              bedroom.surpriseShown = true;
+              playSound(sfxSurprise);
+              startDialogueChain(["SURPRISE!!!"]);
+            }
+          } else {
+            // Bounce back up with less energy
+            player.dropVelocity = -Math.abs(player.dropVelocity) * bounceDamping;
+            // Trigger squash on impact
+            player.dropSquash = 1;
+          }
+        }
+
+        // Decay squash timer
+        if (player.dropSquash > 0) {
+          player.dropSquash = Math.max(0, player.dropSquash - dt * 0.006);
+        }
+
+        // Camera still follows during drop
+        camera.x = player.x + player.w / 2 - SCREEN_W / 2;
+        camera.y = player.y + player.h / 2 - SCREEN_H / 2;
+        camera.x = clamp(camera.x, 0, BG_W - SCREEN_W);
+        camera.y = clamp(camera.y, 0, BG_H - SCREEN_H);
+
+        updateParticles(dt);
+        return;
+      }
+
+      // ── Dialogue update ─────────────────────────────────
+      if (dialogue.active) {
+        // Pop-in animation
+        if (dialogue.enterAnim < 1) {
+          dialogue.enterAnim = Math.min(1, dialogue.enterAnim + dt / dialogue.enterDur);
+        }
+        // Wobble timer
+        dialogue.wobbleTime += dt;
+        // Typewriter
+        dialogue.timer += dt;
+        if (dialogue.charIndex < dialogue.text.length && dialogue.timer >= dialogue.speed) {
+          dialogue.timer = 0;
+          dialogue.charIndex++;
+          dialogue.displayedText = dialogue.text.slice(0, dialogue.charIndex);
+          // Stop talking sound when typing finishes
+          if (dialogue.charIndex >= dialogue.text.length) {
+            stopSound(sfxTalking);
+          }
+        }
+      }
+
+      if (player.jumping) {
+        player.animTimer += dt;
+
+        const frameDur = FRAME_DURATIONS[player.jumpProgress] || 50;
+
+        if (player.animTimer >= frameDur) {
+          player.animTimer = 0;
+          player.jumpProgress++;
+
+          // Move a fraction of JUMP_DISTANCE each frame
+          const stepDist = JUMP_DISTANCE / FRAME_COUNT;
+          player.x += player.jumpDirX * stepDist;
+
+          // Keep player inside the world
+          player.x = clamp(player.x, 0, BG_W - player.w);
+
+          if (player.jumpProgress >= FRAME_COUNT) {
+            // Jump finished — back to idle
+            player.jumping = false;
+            player.frame = 0;
+            player.jumpOffsetY = 0;
+            playSound(sfxBounce);
+          } else {
+            player.frame = player.jumpProgress;
+            // Visual arc — lift character up
+            player.jumpOffsetY = -JUMP_ARC[player.jumpProgress + 1] * JUMP_HEIGHT;
+          }
+        }
+      }
+
+      // ── Camera follows player (centered) ──────────────────
+      camera.x = player.x + player.w / 2 - SCREEN_W / 2;
+      camera.y = player.y + player.h / 2 - SCREEN_H / 2;
+
+      // Clamp camera so we don't show past the edges of the bg
+      camera.x = clamp(camera.x, 0, BG_W - SCREEN_W);
+      camera.y = clamp(camera.y, 0, BG_H - SCREEN_H);
+
+      // Update ambient particles
+      updateParticles(dt);
+
+      // ── Photo frame hover detection (living room) ─────────
+      if (game.currentRoom === "livingroom" && !dialogue.active && !photoOverlay.active) {
+        hoveredFrame = -1;
+        for (let i = 0; i < photoFrames.length; i++) {
+          const f = photoFrames[i];
+          const fx = f.xRatio * BG_W - camera.x;
+          const fy = f.yRatio * BG_H - camera.y;
+          const fw = f.wRatio * BG_W;
+          const fh = f.hRatio * BG_H;
+          if (mouseX >= fx && mouseX <= fx + fw && mouseY >= fy && mouseY <= fy + fh) {
+            hoveredFrame = i;
+            break;
+          }
+        }
+        canvas.style.cursor = hoveredFrame >= 0 ? "pointer" : "default";
+      } else if (game.currentRoom === "livingroom") {
+        hoveredFrame = -1;
+        if (photoOverlay.active) {
+          canvas.style.cursor = "pointer";
+        }
+      }
+
+      // ── Cake hover detection (bedroom) ────────────────────
+      if (game.currentRoom === "bedroom" && !dialogue.active && !cakeOverlay.active && !cardOverlay.active && !bedroom.dark) {
+        const cx = cake.xRatio * BG_W - camera.x;
+        const cy = cake.yRatio * BG_H - camera.y;
+        const cw = cake.wRatio * BG_W;
+        const ch = cake.hRatio * BG_H;
+        hoveredCake = mouseX >= cx && mouseX <= cx + cw && mouseY >= cy && mouseY <= cy + ch;
+
+        const bx = bag.xRatio * BG_W - camera.x;
+        const by = bag.yRatio * BG_H - camera.y;
+        const bw = bag.wRatio * BG_W;
+        const bh = bag.hRatio * BG_H;
+        hoveredBag = mouseX >= bx && mouseX <= bx + bw && mouseY >= by && mouseY <= by + bh;
+
+        canvas.style.cursor = (hoveredCake || hoveredBag) ? "pointer" : "default";
+      } else if (game.currentRoom === "bedroom") {
+        hoveredCake = false;
+        hoveredBag = false;
+        if (cakeOverlay.active || cardOverlay.active) {
+          canvas.style.cursor = "pointer";
+        }
+      }
+
+      // ── Card overlay fade-in ──────────────────────────────
+      if (cardOverlay.active) {
+        cardOverlay.fadeIn = Math.min(1, cardOverlay.fadeIn + dt * 0.004);
+      }
+
+      // ── Cake overlay fade-in + mic detection ──────────────
+      if (cakeOverlay.active) {
+        cakeOverlay.fadeIn = Math.min(1, cakeOverlay.fadeIn + dt * 0.004);
+        // Wait 2 seconds before listening so user can enjoy the GIF
+        if (cakeOverlay.listenDelay < 2000) {
+          cakeOverlay.listenDelay += dt;
+        }
+        // Only check mic after the delay
+        if (cakeOverlay.micActive && !cakeOverlay.blowDetected && cakeOverlay.listenDelay >= 2000) {
+          checkBlowDetection();
+        }
+      }
+
+      // ── Photo overlay fade-in ─────────────────────────────
+      if (photoOverlay.active) {
+        photoOverlay.fadeIn = Math.min(1, photoOverlay.fadeIn + dt * 0.004);
+      }
+
+      // ── Bedroom dark-to-light fade ────────────────────────
+      if (bedroom.lightsOn && bedroom.lightsFade < 1) {
+        bedroom.lightsFade = Math.min(1, bedroom.lightsFade + dt * 0.0015);
+      }
+
+      // ── Confetti update ───────────────────────────────────
+      if (bedroom.confettiActive) {
+        let allDone = true;
+        for (const c of confetti) {
+          c.y += c.speedY;
+          c.x += c.speedX + Math.sin(c.wobblePhase) * 0.5;
+          c.wobblePhase += c.wobbleSpeed * dt;
+          c.rotation += c.rotSpeed;
+          // Fade out near bottom
+          if (c.y > SCREEN_H * 0.85) {
+            c.opacity = Math.max(0, c.opacity - 0.015);
+          }
+          if (c.y < SCREEN_H + 50 && c.opacity > 0) {
+            allDone = false;
+          }
+        }
+        if (allDone) bedroom.confettiActive = false;
+      }
+
+      // ── Gate prompt animation ─────────────────────────────
+      const near = isNearGate() && !dialogue.active && !player.dropping;
+      if (near) {
+        gate.promptAnim = Math.min(1, gate.promptAnim + dt * 0.004);
+        gate.promptWobble += dt;
+      } else {
+        gate.promptAnim = Math.max(0, gate.promptAnim - dt * 0.006);
+      }
+
+      // ── Bedroom gate prompt animation ─────────────────────
+      const nearBedroom = isNearBedroomGate() && !dialogue.active && !player.dropping;
+      if (nearBedroom) {
+        bedroomGate.promptAnim = Math.min(1, bedroomGate.promptAnim + dt * 0.004);
+        bedroomGate.promptWobble += dt;
+      } else {
+        bedroomGate.promptAnim = Math.max(0, bedroomGate.promptAnim - dt * 0.006);
+      }
+
+      // ── Room transition update ────────────────────────────
+      if (transition.active) {
+        transition.timer += dt;
+
+        if (transition.phase === "closing") {
+          if (transition.timer >= transition.closeDur) {
+            transition.phase = "black";
+            transition.timer = 0;
+            // Switch room
+            switchToRoom(transition.targetRoom);
+          }
+        } else if (transition.phase === "black") {
+          if (transition.timer >= transition.blackDur) {
+            transition.phase = "opening";
+            transition.timer = 0;
+          }
+        } else if (transition.phase === "opening") {
+          if (transition.timer >= transition.openDur) {
+            transition.phase = "none";
+            transition.active = false;
+            transition.timer = 0;
+            // Now start the drop-from-sky if pending
+            if (player._pendingDrop) {
+              player._pendingDrop = false;
+              player.y = -player.h - 200;
+              player.dropping = true;
+              player.dropVelocity = 0;
+              player.dropBounces = 0;
+              player.dropSquash = 0;
+              playSound(sfxFallin);
+            }
+          }
+        }
+      }
+    }
+
+    // ── Microphone blow detection ───────────────────────────
+    function startMicListening() {
+      if (cakeOverlay.micActive) return;
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        cakeOverlay.micStream = stream;
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        cakeOverlay.audioCtx = audioCtx;
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        cakeOverlay.analyser = analyser;
+        cakeOverlay.micActive = true;
+      }).catch(err => {
+        console.warn("Mic access denied:", err);
+        // Fallback: allow click to blow out candles
+        cakeOverlay.micActive = false;
+      });
+    }
+
+    function stopMicListening() {
+      if (cakeOverlay.micStream) {
+        cakeOverlay.micStream.getTracks().forEach(t => t.stop());
+        cakeOverlay.micStream = null;
+      }
+      if (cakeOverlay.audioCtx) {
+        cakeOverlay.audioCtx.close();
+        cakeOverlay.audioCtx = null;
+      }
+      cakeOverlay.analyser = null;
+      cakeOverlay.micActive = false;
+    }
+
+    function checkBlowDetection() {
+      if (!cakeOverlay.analyser || cakeOverlay.blowDetected) return;
+      const data = new Uint8Array(cakeOverlay.analyser.frequencyBinCount);
+      cakeOverlay.analyser.getByteFrequencyData(data);
+      // Focus on low-frequency bands (blowing is a low rumble)
+      // Only check the first ~30% of bins (low freq)
+      const lowBins = Math.floor(data.length * 0.3);
+      let sum = 0;
+      for (let i = 0; i < lowBins; i++) sum += data[i];
+      const avg = sum / lowBins;
+      // High threshold — must be a real deliberate blow, not ambient noise
+      if (avg > 130) {
+        // Require sustained blow — count consecutive loud frames
+        if (!cakeOverlay._blowFrames) cakeOverlay._blowFrames = 0;
+        cakeOverlay._blowFrames++;
+        // Need ~8 consecutive loud frames to confirm it's a real blow
+        if (cakeOverlay._blowFrames >= 8) {
+          cakeOverlay.blowDetected = true;
+          cake.candlesOn = false;
+          stopMicListening();
+        }
+      } else {
+        cakeOverlay._blowFrames = 0;  // reset if noise drops
+      }
+    }
+
+    // ── Switch room ─────────────────────────────────────────
+    function switchToRoom(room) {
+      game.currentRoom = room;
+      if (room === "livingroom") {
+        // Recalculate BG size for the living room image
+        if (livingRoomImg.complete) {
+          const imgRatio = livingRoomImg.naturalWidth / livingRoomImg.naturalHeight;
+          if (imgRatio > SCREEN_W / SCREEN_H) {
+            BG_H = SCREEN_H;
+            BG_W = BG_H * imgRatio;
+          } else {
+            BG_W = SCREEN_W;
+            BG_H = BG_W / imgRatio;
+          }
+          if (BG_W < SCREEN_W) { BG_W = SCREEN_W; BG_H = BG_W / imgRatio; }
+          if (BG_H < SCREEN_H) { BG_H = SCREEN_H; BG_W = BG_H * imgRatio; }
+        }
+        // Reposition player on the ground of the new room
+        player.x = 100;
+        player.groundY = BG_H - player.h * 0.9;  // more forward so they look on the floor
+        // Don't start drop yet — wait for iris to open first
+        player.y = -player.h - 9999;  // hide off-screen until iris finishes
+        player._pendingDrop = true; // flag to start drop after iris opens
+        player.dropping = false;
+        player.jumping = false;
+        player.frame = 0;
+        player.jumpOffsetY = 0;
+      }
+      if (room === "bedroom") {
+        // Reset bedroom surprise state
+        bedroom.dark = true;
+        bedroom.lightsOn = false;
+        bedroom.lightsFade = 0;
+        bedroom.confettiActive = false;
+        bedroom.surpriseShown = false;
+        confetti.length = 0;
+        // Reset cake state
+        cake.candlesOn = true;
+        cakeOverlay.active = false;
+        cakeOverlay.fadeIn = 0;
+        cakeOverlay.blowDetected = false;
+        cakeGifEl.style.display = "none";
+        hoveredCake = false;
+        stopMicListening();
+        // Recalculate BG size for the bedroom image
+        if (bedroomImg.complete) {
+          const imgRatio = bedroomImg.naturalWidth / bedroomImg.naturalHeight;
+          if (imgRatio > SCREEN_W / SCREEN_H) {
+            BG_H = SCREEN_H;
+            BG_W = BG_H * imgRatio;
+          } else {
+            BG_W = SCREEN_W;
+            BG_H = BG_W / imgRatio;
+          }
+          if (BG_W < SCREEN_W) { BG_W = SCREEN_W; BG_H = BG_W / imgRatio; }
+          if (BG_H < SCREEN_H) { BG_H = SCREEN_H; BG_W = BG_H * imgRatio; }
+        }
+        // Reposition player
+        player.x = 100;
+        player.groundY = BG_H - player.h * 0.9;
+        player.y = -player.h - 9999;
+        player._pendingDrop = true;
+        player.dropping = false;
+        player.jumping = false;
+        player.frame = 0;
+        player.jumpOffsetY = 0;
+      }
+    }
+
+    // ── Ambient particles ─────────────────────────────────
+
+    // Clouds — soft painted blobs drifting across the sky
+    const clouds = [];
+    for (let i = 0; i < 6; i++) {
+      clouds.push({
+        x: Math.random() * BG_W + 500,
+        y: Math.random() * 120 + 20,    // high in the sky
+        w: Math.random() * 180 + 100,
+        h: Math.random() * 50 + 30,
+        speed: Math.random() * 0.3 + 0.1,
+        opacity: Math.random() * 0.25 + 0.15,
+      });
+    }
+
+    // Sparkles — little glowing dots that float gently
+    const sparkles = [];
+    for (let i = 0; i < 35; i++) {
+      sparkles.push({
+        x: Math.random() * 3000,
+        y: Math.random() * 500,        // mostly in the sky area
+        size: Math.random() * 3 + 1,
+        speed: Math.random() * 0.3 + 0.1,
+        opacity: Math.random(),
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+
+    // Leaf particles — small green bits drifting down near trees
+    const leaves = [];
+    for (let i = 0; i < 15; i++) {
+      leaves.push({
+        x: Math.random() * 2500,
+        y: Math.random() * 400,
+        size: Math.random() * 5 + 3,
+        speedX: Math.random() * 0.4 - 0.1,
+        speedY: Math.random() * 0.5 + 0.2,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: Math.random() * 0.03 - 0.015,
+        opacity: Math.random() * 0.5 + 0.3,
+      });
+    }
+
+    // Dust motes — warm floating particles near the ground
+    const dustMotes = [];
+    for (let i = 0; i < 20; i++) {
+      dustMotes.push({
+        x: Math.random() * 3000,
+        y: Math.random() * 300 + 400,  // near the ground
+        size: Math.random() * 2 + 1,
+        speedX: Math.random() * 0.2 - 0.1,
+        phase: Math.random() * Math.PI * 2,
+        opacity: Math.random() * 0.4 + 0.1,
+      });
+    }
+
+    let globalTime = 0;
+
+    function updateParticles(dt) {
+      globalTime += dt;
+
+      // Only update outdoor particles when outside
+      if (game.currentRoom !== "outside") return;
+
+      // Clouds drift slowly to the right
+      for (const c of clouds) {
+        c.x += c.speed;
+        // Wrap around when off the right edge
+        if (c.x - camera.x > SCREEN_W + 300) {
+          c.x = camera.x - c.w - 100;
+          c.y = Math.random() * 120 + 20;
+        }
+      }
+
+      // Sparkles twinkle
+      for (const s of sparkles) {
+        s.opacity = 0.3 + 0.7 * Math.abs(Math.sin(globalTime * 0.001 + s.phase));
+        s.y += Math.sin(globalTime * 0.0005 + s.phase) * 0.15;
+      }
+
+      // Leaves drift down and sideways
+      for (const l of leaves) {
+        l.x += l.speedX + Math.sin(globalTime * 0.001 + l.rotation) * 0.3;
+        l.y += l.speedY;
+        l.rotation += l.rotSpeed;
+        // Reset when off screen
+        if (l.y > BG_H) {
+          l.y = -10;
+          l.x = Math.random() * BG_W;
+        }
+      }
+
+      // Dust motes float gently
+      for (const d of dustMotes) {
+        d.x += d.speedX;
+        d.y += Math.sin(globalTime * 0.0008 + d.phase) * 0.2;
+        d.opacity = 0.15 + 0.25 * Math.abs(Math.sin(globalTime * 0.0006 + d.phase));
+      }
+    }
+
+    function drawParticles() {
+      // No outdoor particles inside rooms
+      if (game.currentRoom !== "outside") return;
+
+      // Draw clouds (soft watercolor style — layered ellipses)
+      for (const c of clouds) {
+        const cx = c.x - camera.x;
+        const cy = c.y - camera.y;
+        if (cx < -300 || cx > SCREEN_W + 300) continue;
+
+        ctx.save();
+        ctx.globalAlpha = c.opacity;
+        // Main cloud body — multiple soft overlapping blobs
+        const colors = ["#fff8f0", "#ffe8e0", "#fff0ea"];
+        for (let j = 0; j < 3; j++) {
+          ctx.fillStyle = colors[j];
+          ctx.beginPath();
+          ctx.ellipse(
+            cx + j * c.w * 0.25,
+            cy + Math.sin(j * 1.5) * 8,
+            c.w * (0.5 - j * 0.08),
+            c.h * (0.8 - j * 0.1),
+            0, 0, Math.PI * 2
+          );
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // Draw sparkles (warm golden twinkle)
+      for (const s of sparkles) {
+        const sx = s.x - camera.x;
+        const sy = s.y - camera.y;
+        if (sx < -20 || sx > SCREEN_W + 20 || sy < -20 || sy > SCREEN_H + 20) continue;
+
+        ctx.save();
+        ctx.globalAlpha = s.opacity * 0.6;
+        ctx.fillStyle = "#fff5e0";
+        ctx.shadowColor = "#ffe4b5";
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(sx, sy, s.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Draw leaves (soft green)
+      for (const l of leaves) {
+        const lx = l.x - camera.x;
+        const ly = l.y - camera.y;
+        if (lx < -20 || lx > SCREEN_W + 20 || ly < -20 || ly > SCREEN_H + 20) continue;
+
+        ctx.save();
+        ctx.globalAlpha = l.opacity;
+        ctx.translate(lx, ly);
+        ctx.rotate(l.rotation);
+        ctx.fillStyle = "#7cb87a";
+        ctx.beginPath();
+        // Little leaf shape
+        ctx.ellipse(0, 0, l.size, l.size * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Draw dust motes (warm soft glow)
+      for (const d of dustMotes) {
+        const dx = d.x - camera.x;
+        const dy = d.y - camera.y;
+        if (dx < -20 || dx > SCREEN_W + 20 || dy < -20 || dy > SCREEN_H + 20) continue;
+
+        ctx.save();
+        ctx.globalAlpha = d.opacity;
+        ctx.fillStyle = "#ffecd2";
+        ctx.shadowColor = "#ffd1a3";
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.arc(dx, dy, d.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // ── Draw ────────────────────────────────────────────────
+    function draw() {
+      ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
+
+      // Draw background based on current room
+      const currentBg = game.currentRoom === "livingroom" ? livingRoomImg
+                      : game.currentRoom === "bedroom" ? bedroomImg
+                      : bgImg;
+      if (currentBg.complete) {
+        ctx.drawImage(currentBg, -camera.x, -camera.y, BG_W, BG_H);
+      }
+
+      // Draw ambient particles (behind player)
+      drawParticles();
+
+      // Draw bedroom background (no special particles)
+
+      // Draw player sprite
+      const frame = spriteFrames[player.frame];
+      if (frame && frame.complete) {
+        const drawX = player.x - camera.x;
+        const drawY = player.y - camera.y + player.jumpOffsetY;
+
+        // Squash/stretch during drop entrance
+        let scaleX = 1, scaleY = 1;
+        if (player.dropping && player.dropVelocity > 0.5) {
+          const stretch = Math.min(player.dropVelocity * 0.3, 0.25);
+          scaleX = 1 - stretch * 0.5;
+          scaleY = 1 + stretch;
+        }
+        if (player.dropSquash > 0) {
+          const sq = player.dropSquash;
+          scaleX = 1 + sq * 0.35;
+          scaleY = 1 - sq * 0.3;
+        }
+
+        ctx.save();
+        const anchorX = drawX + player.w / 2;
+        const anchorY = drawY + player.h;
+        ctx.translate(anchorX, anchorY);
+        ctx.scale(player.facingRight ? scaleX : -scaleX, scaleY);
+        ctx.drawImage(frame, -player.w / 2, -player.h, player.w, player.h);
+        ctx.restore();
+      }
+
+      // ── Bedroom dark overlay ──────────────────────────────
+      if (game.currentRoom === "bedroom") {
+        let darkAlpha = 0;
+        if (bedroom.dark) {
+          darkAlpha = bedroom.darkOpacity;
+        } else if (bedroom.lightsOn && bedroom.lightsFade < 1) {
+          // Fade from dark to light
+          darkAlpha = bedroom.darkOpacity * (1 - bedroom.lightsFade);
+        }
+        if (darkAlpha > 0.001) {
+          ctx.save();
+          ctx.fillStyle = `rgba(0, 0, 0, ${darkAlpha})`;
+          ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+          ctx.restore();
+        }
+      }
+
+      // Draw gate "Enter" prompt (small bubble above player)
+      if (gate.promptAnim > 0 && !transition.active) {
+        drawGatePrompt();
+      }
+      if (bedroomGate.promptAnim > 0 && !transition.active) {
+        drawBedroomGatePrompt();
+      }
+
+      // Draw dialogue on top of everything
+      if (dialogue.active) drawDialogue();
+
+      // Draw photo frame hover prompt
+      if (hoveredFrame >= 0 && !photoOverlay.active) drawFramePrompt();
+
+      // Draw cake hover prompt (bedroom)
+      if (hoveredCake && !cakeOverlay.active) drawCakePrompt();
+
+      // Draw bag hover prompt (bedroom)
+      if (hoveredBag && !cardOverlay.active) drawBagPrompt();
+
+      // Draw photo overlay (fullscreen)
+      if (photoOverlay.active) drawPhotoOverlay();
+
+      // Draw cake overlay (fullscreen)
+      if (cakeOverlay.active) drawCakeOverlay();
+
+      // Draw card overlay (fullscreen — end of game)
+      if (cardOverlay.active) drawCardOverlay();
+
+      // ── Confetti ──────────────────────────────────────────
+      if (bedroom.confettiActive) {
+        for (const c of confetti) {
+          if (c.opacity <= 0) continue;
+          ctx.save();
+          ctx.globalAlpha = c.opacity;
+          ctx.fillStyle = c.color;
+          ctx.translate(c.x, c.y);
+          ctx.rotate(c.rotation);
+          // Draw a small rectangle piece
+          ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+          ctx.restore();
+        }
+      }
+
+      // Draw room transition iris overlay (on top of everything)
+      if (transition.active) drawTransition();
+    }
+
+    // ── Living room window clouds (clipped to window) ─────
+    function drawWindowClouds() {
+      const wr = windowRegion;
+      const wx = wr.xRatio * BG_W - camera.x;
+      const wy = wr.yRatio * BG_H - camera.y;
+      const ww = wr.wRatio * BG_W;
+      const wh = wr.hRatio * BG_H;
+
+      ctx.save();
+      // Clip to window area — clouds won't bleed into the room
+      ctx.beginPath();
+      ctx.rect(wx, wy, ww, wh);
+      ctx.clip();
+
+      for (const wc of windowClouds) {
+        const cx = wx + wc.xOffset * ww;
+        const cy = wy + wc.yOffset * wh;
+        const cw = wc.w * ww;
+        const ch = wc.h * wh;
+
+        ctx.globalAlpha = wc.opacity;
+        // Soft layered cloud blobs (same watercolor style)
+        const colors = ["rgba(255,248,240,0.8)", "rgba(255,240,234,0.6)", "rgba(255,245,238,0.5)"];
+        for (let j = 0; j < 3; j++) {
+          ctx.fillStyle = colors[j];
+          ctx.beginPath();
+          ctx.ellipse(
+            cx + j * cw * 0.2,
+            cy + Math.sin(j * 1.5) * ch * 0.15,
+            cw * (0.45 - j * 0.06),
+            ch * (0.7 - j * 0.1),
+            0, 0, Math.PI * 2
+          );
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // ── Cake "Click!" hover prompt (bedroom) ────────────────
+    function drawCakePrompt() {
+      const cx = cake.xRatio * BG_W - camera.x;
+      const cy = cake.yRatio * BG_H - camera.y;
+      const cw = cake.wRatio * BG_W;
+      const ch = cake.hRatio * BG_H;
+
+      // Small "Click!" bubble above the cake
+      const px = cx + cw / 2;
+      const py = cy - 12;
+      const bw = 70;
+      const bh = 30;
+      const wobble = performance.now() * 0.003;
+      const bob = Math.sin(wobble) * 3;
+
+      ctx.save();
+      ctx.translate(px, py + bob);
+
+      const hw = bw / 2;
+      const hh = bh / 2;
+      const wob = Math.sin(wobble * 0.7) * 1.5;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -hh + wob);
+      ctx.bezierCurveTo(hw * 0.6, -hh - 3 + wob, hw + 4, -hh * 0.4, hw + 2, wob);
+      ctx.bezierCurveTo(hw + 4, hh * 0.4, hw * 0.6, hh + 3 + wob, 0, hh + wob);
+      ctx.bezierCurveTo(-hw * 0.6, hh + 3 + wob, -hw - 4, hh * 0.4, -hw - 2, wob);
+      ctx.bezierCurveTo(-hw - 4, -hh * 0.4, -hw * 0.6, -hh - 3 + wob, 0, -hh + wob);
+      ctx.closePath();
+
+      ctx.shadowColor = "rgba(160,130,90,0.15)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = "#fdf6e8";
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.strokeStyle = "rgba(220,195,160,0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = "#4a3f32";
+      ctx.font = `13px 'Beth Ellen', cursive`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Click!", 0, wob);
+
+      ctx.restore();
+    }
+
+    // ── Bag "Click!" hover prompt (bedroom) ─────────────────
+    function drawBagPrompt() {
+      const bx = bag.xRatio * BG_W - camera.x;
+      const by = bag.yRatio * BG_H - camera.y;
+      const bww = bag.wRatio * BG_W;
+      const bhh = bag.hRatio * BG_H;
+
+      const px = bx + bww / 2;
+      const py = by - 12;
+      const bw = 70;
+      const bh = 30;
+      const wobble = performance.now() * 0.003;
+      const bob = Math.sin(wobble) * 3;
+
+      ctx.save();
+      ctx.translate(px, py + bob);
+
+      const hw = bw / 2;
+      const hh = bh / 2;
+      const wob = Math.sin(wobble * 0.7) * 1.5;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -hh + wob);
+      ctx.bezierCurveTo(hw * 0.6, -hh - 3 + wob, hw + 4, -hh * 0.4, hw + 2, wob);
+      ctx.bezierCurveTo(hw + 4, hh * 0.4, hw * 0.6, hh + 3 + wob, 0, hh + wob);
+      ctx.bezierCurveTo(-hw * 0.6, hh + 3 + wob, -hw - 4, hh * 0.4, -hw - 2, wob);
+      ctx.bezierCurveTo(-hw - 4, -hh * 0.4, -hw * 0.6, -hh - 3 + wob, 0, -hh + wob);
+      ctx.closePath();
+
+      ctx.shadowColor = "rgba(160,130,90,0.15)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = "#fdf6e8";
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.strokeStyle = "rgba(220,195,160,0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = "#4a3f32";
+      ctx.font = `13px 'Beth Ellen', cursive`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Click!", 0, wob);
+
+      ctx.restore();
+    }
+
+    // ── Card overlay (fullscreen — end of game) ─────────────
+    function drawCardOverlay() {
+      const t = cardOverlay.fadeIn;
+      const eased = 1 - (1 - t) * (1 - t);
+
+      // Dark backdrop
+      ctx.save();
+      ctx.globalAlpha = eased * 0.85;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+      ctx.restore();
+
+      if (!cardImg || !cardImg.complete) return;
+
+      // Scale to fit nicely
+      const maxW = SCREEN_W * 0.75;
+      const maxH = SCREEN_H * 0.8;
+      const imgRatio = cardImg.naturalWidth / cardImg.naturalHeight;
+      let drawW, drawH;
+      if (imgRatio > maxW / maxH) {
+        drawW = maxW;
+        drawH = drawW / imgRatio;
+      } else {
+        drawH = maxH;
+        drawW = drawH * imgRatio;
+      }
+
+      // Pop-in scale
+      const popScale = 0.85 + 0.15 * eased;
+
+      ctx.save();
+      ctx.globalAlpha = eased;
+      ctx.translate(SCREEN_W / 2, SCREEN_H / 2);
+      ctx.scale(popScale, popScale);
+
+      const cornerR = 16;
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 40;
+      ctx.shadowOffsetY = 10;
+
+      ctx.beginPath();
+      ctx.roundRect(-drawW / 2, -drawH / 2, drawW, drawH, cornerR);
+      ctx.clip();
+      ctx.drawImage(cardImg, -drawW / 2, -drawH / 2, drawW, drawH);
+
+      ctx.restore();
+
+      // Hint text at bottom
+      if (eased > 0.5) {
+        ctx.save();
+        ctx.globalAlpha = (eased - 0.5) * 2 * 0.6;
+        ctx.fillStyle = "#fdf6e8";
+        ctx.font = `14px 'Beth Ellen', cursive`;
+        ctx.textAlign = "center";
+        ctx.fillText("click anywhere to close", SCREEN_W / 2, SCREEN_H - 30);
+        ctx.restore();
+      }
+    }
+
+    // ── Cake overlay (fullscreen view with blow-to-extinguish) ─
+    const cakeGifEl = document.getElementById("cakeGifOverlay");
+
+    function drawCakeOverlay() {
+      const t = cakeOverlay.fadeIn;
+      const eased = 1 - (1 - t) * (1 - t);
+
+      // Dark backdrop
+      ctx.save();
+      ctx.globalAlpha = eased * 0.8;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+      ctx.restore();
+
+      // Fixed container size — calculated from the GIF so both states match
+      if (!cakeGif || !cakeGif.complete) return;
+      const maxW = SCREEN_W * 0.75;
+      const maxH = SCREEN_H * 0.8;
+      const gifRatio = cakeGif.naturalWidth / cakeGif.naturalHeight;
+      let boxW, boxH;
+      if (gifRatio > maxW / maxH) {
+        boxW = maxW;
+        boxH = boxW / gifRatio;
+      } else {
+        boxH = maxH;
+        boxW = boxH * gifRatio;
+      }
+
+      const popScale = 0.85 + 0.15 * eased;
+      const finalW = boxW * popScale;
+      const finalH = boxH * popScale;
+      const left = (SCREEN_W - finalW) / 2;
+      const top = (SCREEN_H - finalH) / 2 - 20;
+
+      if (cake.candlesOn) {
+        // Show the real <img> element for animated GIF
+        cakeGifEl.style.display = "block";
+        cakeGifEl.style.left = left + "px";
+        cakeGifEl.style.top = top + "px";
+        cakeGifEl.style.width = finalW + "px";
+        cakeGifEl.style.height = finalH + "px";
+        cakeGifEl.style.opacity = eased;
+      } else {
+        // Candles blown out — hide GIF, draw static image fitted inside same box
+        cakeGifEl.style.display = "none";
+
+        if (cakeOffImg && cakeOffImg.complete) {
+          // Fit the static image within the same box, preserving its aspect ratio
+          const offRatio = cakeOffImg.naturalWidth / cakeOffImg.naturalHeight;
+          let imgW, imgH;
+          if (offRatio > finalW / finalH) {
+            imgW = finalW;
+            imgH = imgW / offRatio;
+          } else {
+            imgH = finalH;
+            imgW = imgH * offRatio;
+          }
+          const imgX = left + (finalW - imgW) / 2;
+          const imgY = top + (finalH - imgH) / 2;
+
+          ctx.save();
+          ctx.globalAlpha = eased;
+
+          const cornerR = 16;
+          ctx.shadowColor = "rgba(0,0,0,0.5)";
+          ctx.shadowBlur = 40;
+          ctx.shadowOffsetY = 10;
+
+          ctx.beginPath();
+          ctx.roundRect(imgX, imgY, imgW, imgH, cornerR);
+          ctx.clip();
+          ctx.drawImage(cakeOffImg, imgX, imgY, imgW, imgH);
+
+          ctx.restore();
+        }
+      }
+
+      // Instruction text at bottom
+      if (eased > 0.5) {
+        ctx.save();
+        ctx.globalAlpha = (eased - 0.5) * 2 * 0.7;
+        ctx.fillStyle = "#fdf6e8";
+        ctx.font = `16px 'Beth Ellen', cursive`;
+        ctx.textAlign = "center";
+        if (cake.candlesOn) {
+          ctx.fillText("🎂 Blow your Candles!", SCREEN_W / 2, SCREEN_H - 50);
+          ctx.font = `12px 'Beth Ellen', cursive`;
+          ctx.globalAlpha *= 0.6;
+          ctx.fillText("(or click anywhere if no mic)", SCREEN_W / 2, SCREEN_H - 28);
+        } else {
+          ctx.fillText("🎉 happy birthday! click anywhere to close", SCREEN_W / 2, SCREEN_H - 40);
+        }
+        ctx.restore();
+      }
+    }
+
+    // ── Photo frame "Click" hover prompt ──────────────────
+    function drawFramePrompt() {
+      const f = photoFrames[hoveredFrame];
+      const fx = f.xRatio * BG_W - camera.x;
+      const fy = f.yRatio * BG_H - camera.y;
+      const fw = f.wRatio * BG_W;
+      const fh = f.hRatio * BG_H;
+
+      // Small "Click" bubble above the frame (no border highlight)
+      const px = fx + fw / 2;
+      const py = fy - 12;
+      const bw = 70;
+      const bh = 30;
+      const wobble = performance.now() * 0.003;
+      const bob = Math.sin(wobble) * 3;
+
+      ctx.save();
+      ctx.translate(px, py + bob);
+
+      const hw = bw / 2;
+      const hh = bh / 2;
+      const wob = Math.sin(wobble * 0.7) * 1.5;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -hh + wob);
+      ctx.bezierCurveTo(hw * 0.6, -hh - 3 + wob, hw + 4, -hh * 0.4, hw + 2, wob);
+      ctx.bezierCurveTo(hw + 4, hh * 0.4, hw * 0.6, hh + 3 + wob, 0, hh + wob);
+      ctx.bezierCurveTo(-hw * 0.6, hh + 3 + wob, -hw - 4, hh * 0.4, -hw - 2, wob);
+      ctx.bezierCurveTo(-hw - 4, -hh * 0.4, -hw * 0.6, -hh - 3 + wob, 0, -hh + wob);
+      ctx.closePath();
+
+      ctx.shadowColor = "rgba(160,130,90,0.15)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = "#fdf6e8";
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.strokeStyle = "rgba(220,195,160,0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = "#4a3f32";
+      ctx.font = `13px 'Beth Ellen', cursive`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Click!", 0, wob);
+
+      ctx.restore();
+    }
+
+    // ── Photo overlay (fullscreen view of selfie) ───────────
+    function drawPhotoOverlay() {
+      const t = photoOverlay.fadeIn;
+      // Smooth ease-out
+      const eased = 1 - (1 - t) * (1 - t);
+
+      // Dark backdrop
+      ctx.save();
+      ctx.globalAlpha = eased * 0.75;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+      ctx.restore();
+
+      const img = photoImgs[photoOverlay.index];
+      if (!img || !img.complete) return;
+
+      // Scale photo to fit nicely (80% of screen, keep aspect ratio)
+      const maxW = SCREEN_W * 0.75;
+      const maxH = SCREEN_H * 0.8;
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      let drawW, drawH;
+      if (imgRatio > maxW / maxH) {
+        drawW = maxW;
+        drawH = drawW / imgRatio;
+      } else {
+        drawH = maxH;
+        drawW = drawH * imgRatio;
+      }
+
+      const dx = (SCREEN_W - drawW) / 2;
+      const dy = (SCREEN_H - drawH) / 2;
+
+      // Pop-in scale
+      const popScale = 0.85 + 0.15 * eased;
+
+      ctx.save();
+      ctx.globalAlpha = eased;
+      ctx.translate(SCREEN_W / 2, SCREEN_H / 2);
+      ctx.scale(popScale, popScale);
+
+      // Rounded photo with shadow
+      const cornerR = 16;
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 40;
+      ctx.shadowOffsetY = 10;
+
+      ctx.beginPath();
+      ctx.roundRect(-drawW / 2, -drawH / 2, drawW, drawH, cornerR);
+      ctx.clip();
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+
+      ctx.restore();
+
+      // "Click anywhere to close" hint at bottom
+      if (eased > 0.5) {
+        ctx.save();
+        ctx.globalAlpha = (eased - 0.5) * 2 * 0.6;
+        ctx.fillStyle = "#fdf6e8";
+        ctx.font = `14px 'Beth Ellen', cursive`;
+        ctx.textAlign = "center";
+        ctx.fillText("click anywhere to close", SCREEN_W / 2, SCREEN_H - 30);
+        ctx.restore();
+      }
+    }
+
+    // ── Gate "Enter" prompt (small AC-style bubble) ─────────
+    function drawGatePrompt() {
+      const t = gate.promptAnim;
+      // Elastic pop
+      const eased = t < 1
+        ? 1 - Math.pow(2, -12 * t) * Math.cos(t * Math.PI * 2) * (1 - t)
+        : 1;
+      const wobble = gate.promptWobble;
+
+      // Position above the player
+      const px = player.x + player.w / 2 - camera.x;
+      const py = player.y - camera.y - 20;
+
+      const bw = 90;
+      const bh = 38;
+
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.scale(eased, eased);
+
+      // Wobble
+      const wob = Math.sin(wobble * 0.003) * 1.5;
+
+      // Small blobby bubble (bezier)
+      const hw = bw / 2;
+      const hh = bh / 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -hh + wob);
+      ctx.bezierCurveTo(hw * 0.6, -hh - 3 + wob, hw + 4, -hh * 0.4, hw + 2, wob);
+      ctx.bezierCurveTo(hw + 4, hh * 0.4, hw * 0.6, hh + 3 + wob, 0, hh + wob);
+      ctx.bezierCurveTo(-hw * 0.6, hh + 3 + wob, -hw - 4, hh * 0.4, -hw - 2, wob);
+      ctx.bezierCurveTo(-hw - 4, -hh * 0.4, -hw * 0.6, -hh - 3 + wob, 0, -hh + wob);
+      ctx.closePath();
+
+      ctx.shadowColor = "rgba(160,130,90,0.15)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = "#fdf6e8";
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.strokeStyle = "rgba(220,195,160,0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Text
+      const fontSize = Math.max(12, Math.min(15, bw * 0.16));
+      ctx.fillStyle = "#4a3f32";
+      ctx.font = `${fontSize}px 'Beth Ellen', cursive`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Enter ↵", 0, wob);
+
+      ctx.restore();
+    }
+
+    // ── Bedroom gate "Enter" prompt ─────────────────────────
+    function drawBedroomGatePrompt() {
+      const t = bedroomGate.promptAnim;
+      const eased = t < 1
+        ? 1 - Math.pow(2, -12 * t) * Math.cos(t * Math.PI * 2) * (1 - t)
+        : 1;
+      const wobble = bedroomGate.promptWobble;
+
+      const px = player.x + player.w / 2 - camera.x;
+      const py = player.y - camera.y - 20;
+
+      const bw = 90;
+      const bh = 38;
+
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.scale(eased, eased);
+
+      const wob = Math.sin(wobble * 0.003) * 1.5;
+
+      const hw = bw / 2;
+      const hh = bh / 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -hh + wob);
+      ctx.bezierCurveTo(hw * 0.6, -hh - 3 + wob, hw + 4, -hh * 0.4, hw + 2, wob);
+      ctx.bezierCurveTo(hw + 4, hh * 0.4, hw * 0.6, hh + 3 + wob, 0, hh + wob);
+      ctx.bezierCurveTo(-hw * 0.6, hh + 3 + wob, -hw - 4, hh * 0.4, -hw - 2, wob);
+      ctx.bezierCurveTo(-hw - 4, -hh * 0.4, -hw * 0.6, -hh - 3 + wob, 0, -hh + wob);
+      ctx.closePath();
+
+      ctx.shadowColor = "rgba(160,130,90,0.15)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 3;
+      ctx.fillStyle = "#fdf6e8";
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      ctx.strokeStyle = "rgba(220,195,160,0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      const fontSize = Math.max(12, Math.min(15, bw * 0.16));
+      ctx.fillStyle = "#4a3f32";
+      ctx.font = `${fontSize}px 'Beth Ellen', cursive`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Enter ↵", 0, wob);
+
+      ctx.restore();
+    }
+
+    // ── Room transition (iris wipe) ─────────────────────────
+    function drawTransition() {
+      const centerX = SCREEN_W / 2;
+      const centerY = SCREEN_H / 2;
+      const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY) + 20;
+
+      let radius;
+      if (transition.phase === "closing") {
+        // Circle closes from full to zero
+        const raw = Math.min(transition.timer / transition.closeDur, 1);
+        const eased = raw * raw; // ease-in (slow start, fast end)
+        radius = (1 - eased) * maxRadius;
+      } else if (transition.phase === "black") {
+        radius = 0;
+      } else if (transition.phase === "opening") {
+        // Circle opens from zero to full
+        const raw = Math.min(transition.timer / transition.openDur, 1);
+        const eased = 1 - (1 - raw) * (1 - raw); // ease-out
+        radius = eased * maxRadius;
+      } else {
+        return;
+      }
+
+      // Black overlay with circular hole
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, SCREEN_W, SCREEN_H);
+      ctx.arc(centerX, centerY, Math.max(0, radius), 0, Math.PI * 2, true);
+      ctx.fillStyle = "#000";
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── Dialogue bubble (Animal Crossing style) ─────────────
+    function drawDialogue() {
+      const t = dialogue.enterAnim;
+      const wobble = dialogue.wobbleTime;
+
+      // Bouncy elastic pop-in (overshoot then settle)
+      let eased;
+      if (t < 1) {
+        const p = t;
+        eased = 1 - Math.pow(2, -10 * p) * Math.cos(p * Math.PI * 2.5) * (1 - p);
+      } else {
+        eased = 1;
+      }
+
+      // Gentle breathing scale after fully open
+      const breathe = t >= 1 ? 1 + Math.sin(wobble * 0.0015) * 0.008 : 1;
+      const totalScale = eased * breathe;
+
+      // ── Bubble sizing ──
+      const bubW = Math.min(540, SCREEN_W * 0.78);
+      const bubH = Math.min(150, SCREEN_H * 0.2);
+      const cx = SCREEN_W / 2;
+      const cy = SCREEN_H - bubH / 2 - 60;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(totalScale, totalScale);
+
+      // ── Draw the organic blobby bubble shape ──
+      // This uses bezier curves to make a wobbly rounded shape
+      // like the AC dialogue — NOT a rectangle
+
+      const hw = bubW / 2;  // half width
+      const hh = bubH / 2;  // half height
+
+      // Wobble offsets for each control point (makes it feel alive)
+      const w1 = Math.sin(wobble * 0.0020) * 3;
+      const w2 = Math.sin(wobble * 0.0017 + 1.2) * 3;
+      const w3 = Math.sin(wobble * 0.0023 + 2.4) * 3;
+      const w4 = Math.sin(wobble * 0.0019 + 3.6) * 3;
+      const w5 = Math.sin(wobble * 0.0021 + 0.8) * 2;
+      const w6 = Math.sin(wobble * 0.0016 + 2.0) * 2;
+
+      // The bubble path — organic rounded blob
+      ctx.beginPath();
+      // Start at top-center
+      ctx.moveTo(0, -hh + w1);
+      // Top-right curve (bulges out a little)
+      ctx.bezierCurveTo(
+        hw * 0.55 + w5, -hh - 6 + w1,    // control 1: pulls top edge up (bulge)
+        hw + 8 + w2, -hh * 0.5 + w5,      // control 2: rounds the corner
+        hw + 5 + w2, 0 + w6               // end: right-center
+      );
+      // Bottom-right curve
+      ctx.bezierCurveTo(
+        hw + 8 + w3, hh * 0.5 + w6,       // control 1
+        hw * 0.55 + w3, hh + 6 + w3,      // control 2: bottom bulge
+        0, hh + w3                          // end: bottom-center
+      );
+      // Bottom-left curve
+      ctx.bezierCurveTo(
+        -hw * 0.55 + w4, hh + 6 + w4,     // control 1: bottom bulge
+        -hw - 8 + w4, hh * 0.5 + w5,      // control 2
+        -hw - 5 + w4, 0 + w6              // end: left-center
+      );
+      // Top-left curve
+      ctx.bezierCurveTo(
+        -hw - 8 + w1, -hh * 0.5 + w6,     // control 1
+        -hw * 0.55 + w1, -hh - 6 + w2,    // control 2: top bulge
+        0, -hh + w1                         // end: back to top-center
+      );
+      ctx.closePath();
+
+      // Soft shadow
+      ctx.shadowColor = "rgba(160,130,90,0.2)";
+      ctx.shadowBlur = 28;
+      ctx.shadowOffsetY = 8;
+
+      // Creamy fill — warm white like AC
+      ctx.fillStyle = "#fdf6e8";
+      ctx.fill();
+
+      // Clear shadow for the border
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Soft warm border
+      ctx.strokeStyle = "rgba(220,195,160,0.45)";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // ── Text ──
+      const fontSize = Math.max(17, Math.min(24, bubW * 0.044));
+      const padX = hw * 0.18;
+
+      ctx.fillStyle = "#4a3f32";
+      ctx.font = `${fontSize}px 'Beth Ellen', cursive`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      // Word-wrap
+      const maxLineW = bubW - padX * 2 - 20;
+      const words = dialogue.displayedText.split(" ");
+      const lines = [];
+      let currentLine = "";
+      for (const word of words) {
+        const test = currentLine ? currentLine + " " + word : word;
+        if (ctx.measureText(test).width > maxLineW && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = test;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+
+      const lineHeight = fontSize * 1.55;
+      const totalTextH = lines.length * lineHeight;
+      const textStartY = -totalTextH / 2 + lineHeight / 2;
+
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], -hw + padX + 10, textStartY + i * lineHeight);
+      }
+
+      // ── Cute bouncing heart indicator (like AC's ▼ but cuter) ──
+      if (dialogue.charIndex >= dialogue.text.length) {
+        const bounce = Math.abs(Math.sin(wobble * 0.004)) * 6;
+        const hx = 0;
+        const hy = hh - 18 + bounce;
+
+        // Little heart shape
+        ctx.fillStyle = "#8aab7c";
+        ctx.beginPath();
+        const hs = 5.5; // heart size
+        ctx.moveTo(hx, hy + hs * 0.7);
+        ctx.bezierCurveTo(hx - hs * 1.2, hy - hs * 0.3, hx - hs * 0.6, hy - hs * 1.2, hx, hy - hs * 0.4);
+        ctx.bezierCurveTo(hx + hs * 0.6, hy - hs * 1.2, hx + hs * 1.2, hy - hs * 0.3, hx, hy + hs * 0.7);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // ── Handle window resize ────────────────────────────────
+    window.addEventListener("resize", () => {
+      SCREEN_W = window.innerWidth;
+      SCREEN_H = window.innerHeight;
+      canvas.width = SCREEN_W;
+      canvas.height = SCREEN_H;
+
+      if (bgImg.complete) {
+        const imgRatio = bgImg.naturalWidth / bgImg.naturalHeight;
+        const sw = window.innerWidth;
+        const sh = window.innerHeight;
+
+        if (imgRatio > sw / sh) {
+          BG_H = sh;
+          BG_W = BG_H * imgRatio;
+        } else {
+          BG_W = sw;
+          BG_H = BG_W / imgRatio;
+        }
+        if (BG_W < sw) { BG_W = sw; BG_H = BG_W / imgRatio; }
+        if (BG_H < sh) { BG_H = sh; BG_W = BG_H * imgRatio; }
+      }
+    });
+  </script>
+</body>
+</html>
